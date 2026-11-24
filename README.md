@@ -12,6 +12,7 @@
 | `shadow-slave-site.jsx` | The source (one React component, default export). Edit this, then rebuild. |
 | `build.mjs`, `package.json` | The build: `npm install`, then `npm run build` writes `index.html`. |
 | `check.mjs` | `npm run check`: runs the source's self-checks (rules engine, rolls, decode, data) in Node and prints the animated-layer count per tab. Exits with an error if a check fails. |
+| `preview.mjs`, `preview/` | `npm run preview -- [tab] [echoes]` writes `preview.html` (not committed): the built site opened on a tab with test data, never saved in the browser. `preview/hollow-mendicant.echo.json` is Weaver's test Echo; it is **not** in the published seed data. |
 
 ## What it does
 
@@ -23,6 +24,7 @@
    - **Rolling** (2026-11-20): click a pool (⚄) or a skill name to roll it on the v2 engine: 6+ succeeds, the keen die carries the ±1/±2 (dashed gold), a natural 10 counts 2, each natural 1 cancels a success or is gifted to the opponent, keep-lowest and the 20-die cap with auto successes, plus the dice sum for ties. A trained skill lets you tap up to Training-level dice to reroll, keeping the better result. Dice arrive as runes. Esc closes.
    - **✎ Edit stats** (2026-11-20): Rank, Class and Soul Shards become editable; attributes get −/+ steppers (1–50, red when over the Rank cap); clicking a skill's diamonds sets its Training 0–3. Everything recalculates live and saves in the browser. **⤓** in the header downloads the character as `.ss.json`, so edits are never only in one browser.
    - **Memories**: zoomed on the Soul Core. Each Memory orbits it as a star; a star's look grows with its Memory Rank (Dormant a plain point → Divine a pulsing twelve-ray star with rings). Higher ranks sit on wider orbits. Click a star, or use the searchable list, to open the Memory's card (image, form, enchantments).
+   - **Echoes** (2026-11-24, Toni's option A *"Beneath the Surface"*): the camera descends below the surface; the sun sits near the top and the horizon at about a quarter of the screen. Each Echo is a black silhouette under the water with a soft halo in the Soul Core's color, a rim line and two eyes in its Rank's color (the Memory-star scale), so it never reads as one of Sunny's Shadows. Stronger Echoes sit deeper. The silhouette comes from the Echo's optional `shape` (beast, humanoid, winged, serpent, swarm; anything else or none = a neutral generic shape). Up to 6 Echoes drift slowly side to side and bob; with more, they hold still to keep the page light. Click an Echo (or the list, or its tag on Status) and it rises a little inside a turning ring and its card opens: image or a large silhouette, name, "Echo of …", Rank badge, Tier as a runic numeral (I–VII), Soul Vitality / Attack pool / Defense pool as written in the sheet, the six attributes (score and modifier, "—" when empty), abilities with a cost badge, and the Boon in a cyan box. The card is display only: no rolls and no cost or limit rules (Echo cost rules are under review). **⟰ Summon / ⟱ Dismiss** is visual only: a summoned Echo rises to just under the surface.
    - **Aspect**: the camera dives inside the core. A turning sigil sits behind the Aspect's name (more star points = higher Aspect Rank: Dormant 3 … Divine 9), in gold lettering; the description as a quotation; the abilities on a vertical *path of ascension*, one sigil node per Soul Rank slot (filled cards in gold, sealed ones dashed), each with **✦ Cast** (spends the slot's Essence: 0 / 3 / 8 / 15 / 24) and **⚄ Roll Soul**; Innate Ability and Legacy when set; the Flaw under a broken red seal. *(The "How an Aspect works" rules summary was removed 2026-11-20; Toni will bring the rules back in a different form. The text is kept in the source as `ASPECT_RULES`.)*
    - **3D core** (2026-11-20): the sun, its Class rings, the rune band and the Memory orbits share one CSS 3D space. Rings and orbits are tilted in perspective and pass behind the sphere; the sphere is shaded and its surface turns; stars always face the viewer.
 4. **Runes on every tab switch.** All text arrives as the Spell's runes and resolves into English.
@@ -31,6 +33,8 @@
 ## Performance (2026-11-20)
 
 Every moving part is a GPU-only animation (move, turn, fade): no blur behind panels, no repainted sea lines or surfaces, stars and glints twinkle in a few whole layers, the inside of the core only runs while you are in it, and the outside scene stops drawing once the camera is inside. About 25–40 animated layers per tab (was 250+). Orbit lines are barely visible; the orbit of the selected or hovered Memory glows a little.
+
+Measured with `npm run check` on 2026-11-24 (running infinite animations; Ranulfo with one Memory): Status 15 · Memories 17 · Aspect 21 · Echoes 11 with no Echoes, 13 with one (its drift + the selection ring), 12 with eight (drift off above 6, ring only); at most 18 (six drifting Echoes + ring). On the Echoes tab the Memory orbits fade out and pause.
 
 ## Canon behind the design
 
@@ -42,6 +46,7 @@ Every moving part is a GPU-only animation (move, turn, fade): no blur behind pan
 ## Data
 
 - Characters use the same JSON as the Character Sheet App, so its exports import directly. Importing a sheet with the same name replaces the old one and keeps its colors.
+- Echoes: `echoes [{ id, name, source, rank, tier, image, shape, attributes, vitality, atkPool, defPool, abilities [{ id, name, cost, desc }], boon }]`. `shape` is optional (new, 2026-11-24). `summoned` is a site-only flag saved with the character.
 - Everything is stored in the browser (`localStorage`, key `ss-soul-sea-v1`), per device. The `.ss.json` files stay the master copy.
 - Ranulfo is built in as the first character (English text from `03 Characters/Players/Ranulfo.md` and `Tallow-Ember.md`).
 
@@ -63,7 +68,8 @@ This writes `index.html`, then runs the self-checks. (Or ask Sigil to rebuild it
 
 ## Not done yet
 
-- **Editing the rest**: stats, Rank, Class, Shards and skills are editable here; names, Aspect text, abilities, Memories and Flaw are still edited in the Character Sheet App and re-imported.
-- **Echoes tab** (skipped for now) and the **rulebook-summary tab** (later).
+- **Editing the rest**: stats, Rank, Class, Shards and skills are editable here; names, Aspect text, abilities, Memories, Echoes and Flaw are still edited in the Character Sheet App and re-imported.
+- **Echo rules**: no summon cost, Echo limit or Echo rolls yet (the cost rules are under review). Summon/Dismiss is visual only.
+- **Rulebook-summary tab** (later).
 - A **Portuguese** version of the text.
 - Fonts (Cinzel, Spectral, IBM Plex Mono, Noto Sans Runic) load from Google Fonts; offline, the browser falls back to system fonts. Runes need a font with the Runic block (Windows has Segoe UI Historic).

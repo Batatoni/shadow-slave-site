@@ -7,6 +7,7 @@ import { useState, useEffect, useMemo, useRef, useContext, useId, createContext,
  * The background is the player's Soul Sea and every tab is a camera zoom on it:
  *   Status   = the whole Soul Sea, zoomed out
  *   Memories = the Soul Core, with each Memory orbiting it as a star (canon: Rain's Soul Sea)
+ *   Echoes   = below the surface, where Echoes drift as silhouettes (deeper = stronger)
  *   Aspect   = inside the Soul Core
  * Text arrives in the Spell's runes and translates into English on every tab switch.
  * Characters use the same JSON as the character sheet app (.ss.json). Saved in localStorage.
@@ -462,7 +463,7 @@ function Sphere({ inner, outer, d, turning }) {
   );
 }
 
-function Core3D({ ch, ci, far, sel, onPick, active }) {
+function Core3D({ ch, ci, far, sel, onPick, active, sunk }) {
   const { inner, outer } = ch.core;
   const glow = 0.55 + (ci / 6) * 0.45; // Class = how saturated the one core is (Open Issue #3)
   // more runes than the band holds; the path clips the rest, so the band always closes
@@ -491,7 +492,7 @@ function Core3D({ ch, ci, far, sel, onPick, active }) {
         </svg>
       </div>
       <Sphere inner={inner} outer={outer} d={R * 2} turning />
-      <Orbits memories={ch.memories} outer={outer} sel={sel} onPick={onPick} active={active} far={far} />
+      <Orbits memories={ch.memories} outer={outer} sel={sel} onPick={onPick} active={active} far={far} hidden={sunk} />
     </div>
   );
 }
@@ -510,16 +511,17 @@ function GhostSuns({ n, inner, outer, real }) {
   });
 }
 
-/** Memories as stars on tilted orbits; each star is turned back to face the viewer, so it stays round while it circles. */
-function Orbits({ memories, outer, sel, onPick, active, far }) {
+/** Memories as stars on tilted orbits; each star is turned back to face the viewer, so it stays round while it circles.
+ *  hidden: below the surface the orbits fade out and their animations pause (no cost while unseen). */
+function Orbits({ memories, outer, sel, onPick, active, far, hidden }) {
   const [hover, setHover] = useState(null);
   const rings = [[], [], []];
   memories.forEach((m) => rings[ringOf(m.rank)].push(m));
-  const play = { animationPlayState: hover ? "paused" : "running" };
+  const play = { animationPlayState: hover || hidden ? "paused" : "running" };
   return ORBITS.map((rad, ri) => {
     const [tilt, turn] = ORBIT_TILT[ri], dur = ORBIT_S[ri], dir = ri % 2 ? " reverse" : "", back = ri % 2 ? "" : " reverse";
     return (
-      <div key={ri} style={{ ...P3, ...far, pointerEvents: active ? "auto" : "none", transform: `rotateZ(${turn}deg) rotateX(${tilt}deg)` }}>
+      <div key={ri} style={{ ...P3, ...far, pointerEvents: active ? "auto" : "none", transform: `rotateZ(${turn}deg) rotateX(${tilt}deg)`, ...(hidden ? { opacity: 0, transition: "opacity .8s" } : {}) }}>
         {rings[ri].length > 0 && <div style={{ ...at(0, 0, rad * 2), borderRadius: "50%", pointerEvents: "none", transition: "border-color .4s",
           border: `1px solid ${hexA(outer, rings[ri].some((m) => m.id === sel || m.id === hover) ? 0.16 : 0.05)}` }} />}
         <div style={{ ...P3, animation: `ssSpin ${dur}s linear infinite${dir}`, ...play }}>
@@ -564,7 +566,7 @@ function Scene({ ch, d, tab, cam, sel, onPick }) {
     }}>
       <div style={far}><Sea inner={inner} outer={outer} /></div>
       <div style={far}><GhostSuns n={d.ci} inner={inner} outer={outer} real={ch.aspectRank === "Divine"} /></div>
-      <Core3D ch={ch} ci={d.ci} far={far} sel={sel} onPick={onPick} active={!!tabOf(tab).stars} />
+      <Core3D ch={ch} ci={d.ci} far={far} sel={sel} onPick={onPick} active={!!tabOf(tab).stars} sunk={!!tabOf(tab).sunk} />
     </div>
   );
 }
@@ -719,7 +721,8 @@ function SelectScreen({ roster, activeId, onBind, onImport }) {
 /**
  * The tabs, in menu order: the single place a tab is defined.
  * cam = where the camera sits on the Soul Sea (sun offset from screen center + zoom); View = the panel drawn over it;
- * delay = rune decode delay (ms); stars = Memory stars are clickable; inside = the camera is inside the core.
+ * delay = rune decode delay (ms); stars = Memory stars are clickable; sunk = below the surface (Memory orbits fade and stop);
+ * inside = the camera is inside the core.
  * Every View gets the same props: { ch, d, wide, vp, go, onChange, onRoll, sel, setSel } (sel = this tab's own selection).
  */
 const TABS = [
@@ -727,6 +730,9 @@ const TABS = [
     cam: (w, h, u, wide) => (wide ? { s: 0.62 * u, x: w * 0.22, y: -h * 0.04 } : { s: 0.5 * u, x: 0, y: -h * 0.24 }) },
   { id: "memories", label: "Memories", View: MemoriesView, delay: 450, stars: true,
     cam: (w, h, u, wide) => (wide ? { s: 1.15 * u, x: -w * 0.02, y: h * 0.03 } : { s: 0.95 * u, x: 0, y: -h * 0.2 }) },
+  // the camera descends below the surface: sun near the top, horizon at ~25% (Toni 2026-11-24, option A "Beneath the Surface")
+  { id: "echoes", label: "Echoes", View: EchoesView, delay: 450, sunk: true,
+    cam: (w, h) => { const b = echoBand(w, h); return { s: (b.horizon - b.sunY) / SEA_Y, x: (b.left + b.right) / 2 - w / 2, y: b.sunY - h / 2 }; } },
   { id: "aspect", label: "Aspect", View: AspectView, delay: 900, inside: true,
     cam: (w, h, u) => ({ s: 13 * u, x: 0, y: 0 }) },
 ];
@@ -747,10 +753,10 @@ function Header({ ch, d, tab, setTab, onPicker, onSwap, onExport, wide, warn }) 
           <div style={{ ...label, fontSize: 9 }}>{d.rank.title} · {d.cls.name}{warn ? " · not saved on this device" : ""}</div>
         </div>
       </div>
-      <nav style={{ display: "flex", gap: wide ? 34 : 18, justifyContent: "center", order: wide ? 0 : 3, width: wide ? "auto" : "100%", pointerEvents: "auto" }}>
+      <nav style={{ display: "flex", gap: wide ? 34 : 12, justifyContent: "center", order: wide ? 0 : 3, width: wide ? "auto" : "100%", pointerEvents: "auto" }}>
         {TABS.map(({ id, label: text }) => (
           <button key={id} onClick={() => setTab(id)} aria-current={tab === id ? "page" : undefined} style={{
-            background: "none", border: "none", cursor: "pointer", padding: "6px 2px", fontFamily: F.mono, fontSize: 12, letterSpacing: 4,
+            background: "none", border: "none", cursor: "pointer", padding: "6px 2px", fontFamily: F.mono, fontSize: wide ? 12 : 11, letterSpacing: wide ? 4 : 2.5,
             textTransform: "uppercase", color: tab === id ? C.cyan : C.dim, borderBottom: `1px solid ${tab === id ? C.cyan : "transparent"}`,
             textShadow: tab === id ? `0 0 12px ${hexA(C.cyan, 0.7)}` : "none", transition: "color .3s",
           }}><Rune text={text} /></button>
@@ -964,7 +970,7 @@ function StatusView({ ch, d, go, wide, onChange, onRoll }) {
           </> : <span style={{ color: C.faint }}>—</span>}
         </Line>
         <Line k="Echoes" delay={420}>
-          {ch.echoes.length ? ch.echoes.map((e) => <Tag key={e.id} text={e.name} delay={480} onClick={TAB.echoes ? () => go("echoes", e.id) : undefined} />) : <span style={{ color: C.faint }}>—</span>}
+          {ch.echoes.length ? ch.echoes.map((e) => <Tag key={e.id} text={e.name} delay={480} onClick={() => go("echoes", e.id)} />) : <span style={{ color: C.faint }}>—</span>}
         </Line>
         <Line k="Attributes" delay={490}>
           {ch.statusAttributes.length ? ch.statusAttributes.map((a, i) => (
@@ -1120,6 +1126,280 @@ function MemoriesView({ ch, sel, setSel, wide }) {
       {m && <MemoryCard key={m.id} m={m} />}
       <MemoryList ms={ch.memories} sel={sel} setSel={setSel} />
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Tab: Echoes (beneath the surface of the Soul Sea)                  */
+/* ------------------------------------------------------------------ */
+const circ = (x, y, r) => `M${x - r} ${y} a${r} ${r} 0 1 0 ${2 * r} 0 a${r} ${r} 0 1 0 ${-2 * r} 0 Z`;
+/**
+ * Echo silhouettes: one entry per `shape` value (add a shape = add an entry). viewBox −50…50, facing right.
+ * parts: filled paths { d } or thick strokes { d, sw }; eyes: the two eye points [x, y].
+ * Black body, rim light, two eyes: so an Echo never reads as one of Sunny's Shadows.
+ */
+const ECHO_SHAPES = {
+  generic: { label: "Unknown", eyes: [[-7, -14], [7, -14]], parts: [
+    { d: "M0 -34 C16 -34 26 -20 26 -2 C26 14 34 24 30 34 C20 28 14 36 6 30 C0 36 -6 36 -10 30 C-18 36 -24 28 -30 34 C-34 24 -26 14 -26 -2 C-26 -20 -16 -34 0 -34 Z" },
+  ] },
+  beast: { label: "Beast", eyes: [[36, -15], [41, -14]], parts: [
+    { d: "M-40 4 C-44 -2 -42 -8 -36 -10 C-26 -16 -6 -16 10 -14 C18 -13 22 -20 28 -22 L31 -31 L34 -22 L38 -29 L39 -20 C44 -18 48 -12 48 -8 L44 -4 C40 -3 36 -2 32 0 C28 6 24 10 22 12 L25 30 L18 30 L15 14 C6 16 -6 16 -16 14 L-19 30 L-26 30 L-27 12 C-32 10 -36 8 -40 4 Z" },
+    { d: "M-38 -4 C-46 -8 -49 -18 -45 -27 C-44 -17 -40 -11 -33 -9 Z" },
+  ] },
+  humanoid: { label: "Humanoid", eyes: [[-2.6, -34], [2.6, -34]], parts: [
+    { d: circ(0, -33, 7) },
+    { d: "M-6 -25 C-13 -24 -18 -18 -19 -6 L-23 14 L-18 15 L-13 -2 L-11 12 L-12 44 L-4 44 L-1 17 L1 17 L4 44 L12 44 L11 12 L13 -2 L18 15 L23 14 L19 -6 C18 -18 13 -24 6 -25 Z" },
+  ] },
+  winged: { label: "Winged", eyes: [[-2, -17], [2, -17]], parts: [
+    { d: "M0 -24 C4 -24 6 -18 5 -10 C9 -14 18 -22 30 -26 C38 -28 46 -24 49 -18 C42 -18 38 -14 36 -8 C32 -12 26 -12 22 -6 C18 -10 12 -8 9 -2 C7 6 5 16 0 26 C-5 16 -7 6 -9 -2 C-12 -8 -18 -10 -22 -6 C-26 -12 -32 -12 -36 -8 C-38 -14 -42 -18 -49 -18 C-46 -24 -38 -28 -30 -26 C-18 -22 -9 -14 -5 -10 C-6 -18 -4 -24 0 -24 Z" },
+    { d: "M-4 -22 L-6 -30 L-1 -24 Z" }, { d: "M4 -22 L6 -30 L1 -24 Z" },
+  ] },
+  serpent: { label: "Serpent", eyes: [[37, -13], [41, -11]], parts: [
+    { d: "M-44 22 C-47 19 -48 16 -47 12", sw: 4 },
+    { d: "M-44 22 C-30 36 -14 30 -13 16 C-12 2 -2 -6 10 0 C22 6 26 20 35 12 C40 7 38 -2 33 -7", sw: 8 },
+    { d: "M27 -9 C29 -17 39 -20 46 -14 C49 -10 45 -5 38 -4 C33 -3 29 -5 27 -9 Z" },
+  ] },
+  swarm: { label: "Swarm", eyes: [[-3, -4], [3, -4]], parts: [
+    [0, -2, 9], [-22, -14, 4], [-30, 4, 3.5], [-16, 14, 4.5], [18, -18, 3.5], [28, -2, 4.5], [20, 16, 3.5],
+    [-6, 26, 3], [8, -28, 3], [-12, -30, 2.5], [36, 14, 2.5], [-38, -8, 2.5], [4, 22, 2.8],
+  ].map(([x, y, r]) => ({ d: circ(x, y, r) })) },
+};
+/** The silhouette for an Echo's `shape`; missing or unknown = the neutral generic one. */
+const echoShape = (s) => {
+  const k = String(s ?? "").trim().toLowerCase();
+  return Object.prototype.hasOwnProperty.call(ECHO_SHAPES, k) ? ECHO_SHAPES[k] : ECHO_SHAPES.generic;
+};
+/** Rank → depth: 0 = just under the surface (Dormant) … 1 = deepest (Divine). Stronger Echoes sink deeper. */
+const echoDepth = (rank) => rankIdx(rank) / (RANK_ORDER.length - 1);
+/** Rank → rim and eye color, the same scale as the Memory stars. */
+const echoColor = (rank) => (STARS[rank] || STARS.Dormant).c;
+const NUMERALS = ["I", "II", "III", "IV", "V", "VI", "VII"];
+/** "III", 3, "3", "Tier 3", "iii" → "III"; anything outside I–VII → "". */
+function tierNumeral(t) {
+  const s = String(t ?? "").trim().toUpperCase().replace(/^TIER\s*/, "");
+  const n = /^\d+$/.test(s) ? Number(s) : NUMERALS.indexOf(s) + 1;
+  return n >= 1 && n <= 7 ? NUMERALS[n - 1] : "";
+}
+const ECHO_DRIFT_MAX = 6; // above this many Echoes the drift stops: they hold still, nothing animates per Echo
+/** Where each Echo floats, as fractions of the underwater band: x across, y down from the surface (deeper = stronger). */
+function echoLayout(echoes) {
+  const n = echoes.length;
+  return echoes.map((e, i) => ({
+    id: e.id,
+    x: n === 1 ? 0.5 : 0.08 + (0.84 * i) / (n - 1),
+    y: Math.max(0, Math.min(1, 0.1 + echoDepth(e.rank) * 0.78 + (hash(i + 7) - 0.5) * 0.08)),
+  }));
+}
+/** The underwater band on screen (px): sun near the top, horizon at ~25%, Echoes between the panels. */
+function echoBand(w, h) {
+  const wide = w >= 980;
+  const sunY = h * (wide ? 0.11 : 0.14), horizon = h * (wide ? 0.25 : 0.26);
+  const left = wide ? w * 0.03 + 320 : 14, right = wide ? w - (w * 0.03 + Math.min(420, w * 0.3) + 24) : w - 14;
+  return { wide, sunY, horizon, left, right, top: horizon + (wide ? 44 : 30), bottom: wide ? h - 70 : h * 0.53 };
+}
+
+/** One Echo: a black silhouette, a soft halo in the Soul Core's color, a rim line and two eyes in its Rank's color. */
+function EchoGlyph({ shape, rank, halo, size = 80, flip }) {
+  const s = echoShape(shape), c = echoColor(rank), k = rankIdx(rank);
+  const fills = s.parts.filter((p) => !p.sw), strokes = s.parts.filter((p) => p.sw);
+  return (
+    <svg width={size} height={size} viewBox="-50 -50 100 100" aria-hidden="true" style={{ display: "block", overflow: "visible", transform: flip ? "scaleX(-1)" : undefined }}>
+      <g fill="none" stroke={halo} strokeOpacity="0.3" strokeLinejoin="round" strokeLinecap="round">
+        {strokes.map((p, i) => <path key={`s${i}`} d={p.d} strokeWidth={p.sw + 6} />)}
+        {fills.map((p, i) => <path key={`f${i}`} d={p.d} strokeWidth="6" />)}
+      </g>
+      <g strokeLinejoin="round" strokeLinecap="round">
+        {strokes.map((p, i) => <path key={`r${i}`} d={p.d} fill="none" stroke={c} strokeOpacity="0.9" strokeWidth={p.sw + 1.8} />)}
+        {strokes.map((p, i) => <path key={`b${i}`} d={p.d} fill="none" stroke="#020304" strokeWidth={p.sw} />)}
+        {fills.map((p, i) => <path key={`f${i}`} d={p.d} fill="#020304" stroke={c} strokeOpacity="0.9" strokeWidth="1.1" />)}
+      </g>
+      {s.eyes.map(([x, y], i) => (
+        <g key={i}><circle cx={x} cy={y} r="4.5" fill={`url(#ssg-${k})`} /><circle cx={x} cy={y} r="1.3" fill={c} /></g>
+      ))}
+    </svg>
+  );
+}
+
+/** The Echoes under the water. Screen-space layer, mounted only on this tab. */
+function EchoSea({ ch, vp, sel, setSel }) {
+  const [hover, setHover] = useState(null);
+  const b = echoBand(vp.w, vp.h), W = b.right - b.left, H = b.bottom - b.top;
+  const n = ch.echoes.length, lay = echoLayout(ch.echoes), outer = ch.core.outer;
+  const drift = n <= ECHO_DRIFT_MAX && !REDUCED;
+  const sz = Math.max(b.wide ? 58 : 42, Math.min(b.wide ? 96 : 66, (W / Math.max(1, n)) * 1.15));
+  return (
+    <div style={{ position: "absolute", inset: 0, animation: REDUCED ? undefined : "ssFade 1.4s ease .9s both" }}>
+      {/* light falling through the water, so the black silhouettes read against the deep (static) */}
+      <div aria-hidden="true" style={{ position: "absolute", left: b.left - 80, width: W + 160, top: b.horizon, bottom: 0,
+        background: `radial-gradient(ellipse 55% 75% at 50% 0%, ${hexA(outer, 0.17)} 0%, ${hexA(outer, 0.06)} 55%, transparent 80%)` }} />
+      {ch.echoes.map((e, i) => {
+        const p = lay[i], on = sel === e.id, hot = hover === e.id, c = echoColor(e.rank);
+        const y = b.top + p.y * H;
+        const rise = e.summoned ? b.horizon + sz * 0.32 - y : on ? -sz * 0.2 : 0; // summoned: up to the surface; selected: rises a little
+        return (
+          <div key={e.id} style={{ ...at(b.left + p.x * W, y, sz), transform: `translateY(${rise}px)`, transition: REDUCED ? "none" : "transform 1.4s cubic-bezier(.3,0,.2,1)", zIndex: on ? 2 : 1 }}>
+            <div style={{ position: "absolute", inset: 0, animation: drift ? `ssDrift ${15 + hash(i + 1) * 9}s ease-in-out ${-hash(i + 3) * 20}s infinite` : undefined }}>
+              {on && (
+                <svg aria-hidden="true" viewBox="-50 -50 100 100" style={{ position: "absolute", inset: -sz * 0.16, overflow: "visible", animation: REDUCED ? undefined : "ssSpin 14s linear infinite" }}>
+                  <circle r="47" fill="none" stroke={c} strokeOpacity="0.8" strokeWidth="0.9" strokeDasharray="5 5" />
+                </svg>
+              )}
+              <button aria-label={`Echo: ${e.name || "unnamed"}`} aria-pressed={on} onClick={() => setSel(e.id)}
+                onMouseEnter={() => setHover(e.id)} onMouseLeave={() => setHover(null)} onFocus={() => setHover(e.id)} onBlur={() => setHover(null)}
+                style={{ position: "absolute", inset: 0, padding: 0, border: "none", background: "transparent", cursor: "pointer", pointerEvents: "auto" }}>
+                <EchoGlyph shape={e.shape} rank={e.rank} halo={outer} size={sz} flip={i % 2 === 1} />
+              </button>
+              {(on || hot) && (
+                <div style={{ position: "absolute", top: "100%", marginTop: 6, whiteSpace: "nowrap", fontFamily: F.mono, fontSize: 9.5, letterSpacing: 1.2, color: C.ash, textShadow: "0 0 6px #000, 0 0 2px #000", pointerEvents: "none",
+                  ...(p.x < 0.2 ? { left: 0 } : p.x > 0.8 ? { right: 0 } : { left: "50%", transform: "translateX(-50%)" }) }}>{/* near an edge the label hangs inward */}
+                  {e.name}{e.summoned ? " · summoned" : ""}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Tier as a runic numeral in a small diamond. */
+function TierMark({ tier, color = C.cyan }) {
+  const t = tierNumeral(tier);
+  if (!t) return null;
+  return (
+    <span title={`Tier ${t}`} style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+      <span style={{ ...label, fontSize: 9, color: C.dim }}>Tier</span>
+      <span style={{ position: "relative", width: 34, height: 34, display: "inline-grid", placeItems: "center" }}>
+        <span aria-hidden="true" style={{ position: "absolute", inset: 5, transform: "rotate(45deg)", border: `1px solid ${hexA(color, 0.6)}`, background: hexA(color, 0.06) }} />
+        <span style={{ position: "relative", fontFamily: F.title, fontSize: t.length > 2 ? 11 : 13.5, color, textShadow: `0 0 10px ${hexA(color, 0.6)}` }}><Rune text={t} /></span>
+      </span>
+    </span>
+  );
+}
+
+const shown = (v) => (v == null || String(v).trim() === "" ? "—" : String(v));
+const scoreOf = (v) => (v == null || String(v).trim() === "" || !Number.isFinite(Number(v)) ? null : Number(v));
+
+/** Display only: no rolls, no costs (Echo cost rules are under review). */
+function EchoCard({ e, halo, onSummon }) {
+  const c = echoColor(e.rank), shape = echoShape(e.shape);
+  const fadeMask = { WebkitMaskImage: "linear-gradient(to bottom, #000 55%, transparent)", maskImage: "linear-gradient(to bottom, #000 55%, transparent)" };
+  return (
+    <Panel title="Echo" accent={c} delay={0.2}>
+      {e.image ? (
+        <img src={e.image} alt="" style={{ width: "100%", maxHeight: 230, objectFit: "cover", display: "block", margin: "-6px 0 14px", ...fadeMask }} />
+      ) : (
+        <div style={{ display: "grid", placeItems: "center", height: 170, margin: "-6px 0 10px", background: `radial-gradient(ellipse at 50% 0%, ${hexA(halo, 0.16)}, transparent 70%)`, ...fadeMask }}>
+          <EchoGlyph shape={e.shape} rank={e.rank} halo={halo} size={132} />
+        </div>
+      )}
+      <Rune block text={e.name || "Unnamed Echo"} style={{ fontFamily: F.title, fontSize: 23, color: "#E9F1F7", letterSpacing: 1, lineHeight: 1.25 }} />
+      {e.source && <Rune block text={`Echo of ${e.source}`} delay={80} style={{ fontStyle: "italic", color: C.dim, fontSize: 15.5, marginTop: 2 }} />}
+      <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", margin: "12px 0 4px" }}>
+        <Badge color={c}>{e.rank || "Dormant"} Echo</Badge>
+        <TierMark tier={e.tier} />
+        {e.shape && <span style={{ fontFamily: F.mono, fontSize: 9.5, color: C.faint, letterSpacing: 1 }}>{shape === ECHO_SHAPES.generic ? e.shape : shape.label}</span>}
+        <button onClick={onSummon} aria-pressed={!!e.summoned} title="Visual only: a summoned Echo rises to the surface" style={{ ...chip(C.cyan, !!e.summoned), marginLeft: "auto" }}>
+          {e.summoned ? "⟱ Dismiss" : "⟰ Summon"}
+        </button>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginTop: 14 }}>
+        <Stat k="Soul Vitality" v={shown(e.vitality)} />
+        <Stat k="Attack pool" v={shown(e.atkPool)} />
+        <Stat k="Defense pool" v={shown(e.defPool)} />
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(84px, 1fr))", gap: 6, marginTop: 10 }}>
+        {ATTRS.map((a) => {
+          const s = scoreOf(e.attributes?.[a.key]);
+          return (
+            <div key={a.key} title={a.name} style={{ border: `1px solid ${hexA(C.cyan, 0.12)}`, background: "rgba(3,4,7,0.5)", padding: "6px 8px", display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+              <span style={{ fontFamily: F.mono, fontSize: 9.5, color: C.dim }}>{a.key}</span>
+              <span style={{ fontFamily: F.title, fontSize: 17, color: s == null ? C.faint : C.ash }}>{s == null ? "—" : s}</span>
+              <span style={{ fontFamily: F.mono, fontSize: 10.5, color: C.goldHi }}>{s == null ? "—" : fmt(scoreToMod(s))}</span>
+            </div>
+          );
+        })}
+      </div>
+      {e.abilities.length > 0 && <div style={{ ...label, fontSize: 9, margin: "18px 0 4px" }}><Rune text="Abilities" /></div>}
+      {e.abilities.map((ab, i) => (
+        <div key={ab.id || i} style={{ padding: "12px 0", borderTop: `1px solid ${hexA(c, 0.18)}` }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+            <span style={{ fontFamily: F.body, fontSize: 16.5, color: C.ash }}>[<Rune text={ab.name || "Ability"} delay={200 + i * 100} />]</span>
+            {ab.cost && <Badge color={/^passive$/i.test(String(ab.cost).trim()) ? C.dim : C.cyan}>{ab.cost}</Badge>}
+          </div>
+          {ab.desc && <Rune block text={ab.desc} delay={260 + i * 100} style={{ color: C.ash, fontSize: 15, lineHeight: 1.6, marginTop: 6 }} />}
+        </div>
+      ))}
+      {e.boon && (
+        <div style={{ position: "relative", marginTop: 18, padding: "14px 14px 12px", border: `1px solid ${hexA(C.cyan, 0.28)}`, background: `linear-gradient(180deg, ${hexA(C.cyan, 0.08)}, ${hexA(C.cyan, 0.02)})` }}>
+          <span style={{ ...label, fontSize: 8.5, position: "absolute", top: -7, left: 10, padding: "0 6px", background: "#0A1218" }}>Boon</span>
+          <Rune block text={e.boon} delay={320} style={{ fontFamily: F.mono, fontSize: 12, color: C.cyan, lineHeight: 1.65 }} />
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+function EchoList({ ch, sel, setSel }) {
+  const [q, setQ] = useState("");
+  const es = ch.echoes;
+  const list = es.filter((e) => `${e.name} ${e.source} ${e.rank} ${e.shape}`.toLowerCase().includes(q.trim().toLowerCase()));
+  return (
+    <Panel title="Echoes" delay={0.45}>
+      {es.length > 4 && <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search echoes…" aria-label="Search echoes" style={{ ...inputStyle, width: "100%", marginBottom: 10 }} />}
+      {list.map((e, i) => (
+        <button key={e.id} onClick={() => setSel(e.id)} style={{
+          display: "flex", gap: 10, alignItems: "center", width: "100%", textAlign: "left", cursor: "pointer", padding: "8px 6px",
+          background: sel === e.id ? hexA(C.cyan, 0.08) : "transparent", border: "none", borderBottom: `1px solid ${hexA(C.cyan, 0.08)}`,
+        }}>
+          <EchoGlyph shape={e.shape} rank={e.rank} halo={ch.core.outer} size={30} />
+          <span style={{ minWidth: 0 }}>
+            <span style={{ display: "block", fontFamily: F.body, fontSize: 15.5, color: sel === e.id ? "#E9F1F7" : C.ash }}><Rune text={e.name || "Unnamed Echo"} delay={i * 60} /></span>
+            <span style={{ display: "block", ...label, fontSize: 8.5, color: C.dim }}>
+              {[e.rank, tierNumeral(e.tier) && `Tier ${tierNumeral(e.tier)}`, e.summoned && "summoned"].filter(Boolean).join(" · ")}
+            </span>
+          </span>
+        </button>
+      ))}
+      {!es.length && <Rune block text="No Echo answers your call yet." style={{ fontStyle: "italic", color: C.dim }} />}
+      {es.length > 0 && !list.length && <div style={{ fontStyle: "italic", color: C.dim }}>Nothing answers to that name.</div>}
+      <div style={{ ...label, fontSize: 8.5, color: C.faint, margin: "16px 0 6px" }}>Deeper and brighter = higher Echo Rank</div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 10px" }}>
+        {RANK_ORDER.map((r) => (
+          <span key={r} title={r} style={{ display: "flex", alignItems: "center", gap: 4, fontFamily: F.mono, fontSize: 8.5, color: C.dim }}>
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: echoColor(r), boxShadow: `0 0 6px ${echoColor(r)}` }} />{r.slice(0, 4)}
+          </span>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+function EchoesView({ ch, vp, wide, sel, setSel, onChange }) {
+  const e = ch.echoes.find((x) => x.id === sel);
+  const summon = () => onChange({ echoes: ch.echoes.map((x) => (x.id === sel ? { ...x, summoned: !x.summoned } : x)) });
+  const card = e && <EchoCard key={e.id} e={e} halo={ch.core.outer} onSummon={summon} />;
+  const sea = <EchoSea ch={ch} vp={vp} sel={sel} setSel={setSel} />;
+  if (wide) {
+    return (
+      <>
+        {sea}
+        <div style={{ position: "absolute", left: "3vw", top: 96, bottom: 20, width: 300, overflowY: "auto", pointerEvents: "auto", padding: "12px 6px 12px 2px" }}>
+          <EchoList ch={ch} sel={sel} setSel={setSel} />
+        </div>
+        {e && <div key={e.id} style={{ position: "absolute", right: "3vw", top: 96, bottom: 20, width: "min(420px, 30vw)", overflowY: "auto", pointerEvents: "auto", padding: "12px 6px 12px 2px" }}>{card}</div>}
+      </>
+    );
+  }
+  return (
+    <>
+      {sea}
+      <div style={{ position: "absolute", left: 12, right: 12, top: "56vh", bottom: 10, overflowY: "auto", pointerEvents: "auto", display: "grid", gap: 26, alignContent: "start", padding: "12px 4px" }}>
+        {card}
+        <EchoList ch={ch} sel={sel} setSel={setSel} />
+      </div>
+    </>
   );
 }
 
@@ -1378,6 +1658,7 @@ input::placeholder{color:${C.faint}}
 @keyframes ssFadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
 @keyframes ssRise{0%{transform:translateY(0);opacity:0}15%{opacity:.8}100%{transform:translateY(-55vh);opacity:0}}
 @keyframes ssLine{from{transform:scaleX(0);opacity:0}to{transform:scaleX(1);opacity:1}}
+@keyframes ssDrift{0%,100%{transform:translate(-14px,0)}25%{transform:translate(0,-4px)}50%{transform:translate(14px,0)}75%{transform:translate(0,4px)}}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
 `;
 
@@ -1503,3 +1784,14 @@ console.assert(rollPool(dicePool(18, 30)).dice.length === 20 && rollPool(dicePoo
 const normEcho = normalize({ name: "T", echoes: [{ name: "E", image: "javascript:x" }, null] }).echoes;
 console.assert(normEcho.length === 1 && !!normEcho[0].id && normEcho[0].image === "" && Array.isArray(normEcho[0].abilities), "normalize: echoes get an id, a safe image, abilities");
 console.assert(tabOf("nope") === TABS[0] && TABS.every((t) => t.View && t.cam && t.label), "tabs: one registry; unknown id falls back to the first");
+console.assert(TABS.map((t) => t.id).join() === "status,memories,echoes,aspect", "tabs: Status · Memories · Echoes · Aspect");
+console.assert(echoShape("Beast") === ECHO_SHAPES.beast && echoShape(" serpent ") === ECHO_SHAPES.serpent, "echo shape: by name, any case");
+console.assert(echoShape(undefined) === ECHO_SHAPES.generic && echoShape("dragon") === ECHO_SHAPES.generic && echoShape("constructor") === ECHO_SHAPES.generic, "echo shape: missing/unknown = generic");
+console.assert(Object.values(ECHO_SHAPES).every((s) => s.label && s.eyes.length === 2 && s.parts.length > 0), "echo shapes: every shape has a label, two eyes, a body");
+console.assert(echoDepth("Dormant") === 0 && echoDepth("Divine") === 1 && echoDepth("Awakened") < echoDepth("Supreme") && echoDepth("junk") === 0, "echo depth: stronger = deeper");
+console.assert(echoColor("Supreme") === STARS.Supreme.c && echoColor("junk") === STARS.Dormant.c, "echo color: Memory-star scale");
+console.assert(tierNumeral("III") === "III" && tierNumeral(3) === "III" && tierNumeral("Tier 7") === "VII" && tierNumeral("iv") === "IV", "tier numeral: I–VII");
+console.assert(tierNumeral("8") === "" && tierNumeral("") === "" && tierNumeral(null) === "" && tierNumeral("0") === "", "tier numeral: out of range = none");
+const lay = echoLayout(RANK_ORDER.map((r, i) => ({ id: `e${i}`, rank: r })));
+console.assert(lay.every((p, i) => p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y <= 1 && (i === 0 || p.y > lay[i - 1].y)), "echo layout: inside the band; each Rank sits deeper than the one below it");
+console.assert([[1440, 900], [360, 740]].every(([w, h]) => { const b = echoBand(w, h), c = camera("echoes", w, h); return Math.abs(h / 2 + c.y + SEA_Y * c.s - b.horizon) < 0.5 && Math.abs(b.horizon / h - 0.25) < 0.02; }), "echo camera: horizon at ~25%");

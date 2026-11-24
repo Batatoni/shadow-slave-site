@@ -1,0 +1,18 @@
+{
+  "_note": "Test Echo from Weaver, for preview only. NOT part of the published seed data (Ranulfo has no Echoes).",
+  "id": "echo-hollow-mendicant-test",
+  "name": "Hollow Mendicant",
+  "source": "Hollow Mendicant",
+  "rank": "Dormant",
+  "tier": "I",
+  "image": "",
+  "shape": "humanoid",
+  "attributes": { "STR": 12, "DEX": 10, "CON": 12, "INT": 8, "WIS": 8, "SOUL": 8 },
+  "vitality": "12",
+  "atkPool": "1d10",
+  "defPool": "1d10",
+  "abilities": [
+    { "id": "ea-famished", "name": "Famished", "cost": "passive", "desc": "Once it hits, it cannot be made to disengage short of death." }
+  ],
+  "boon": "Soulless copy of a slain Hollow Mendicant; it never grows. A poor fighter but a tireless sentry. Summon cost not defined here (under review)."
+}
