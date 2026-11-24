@@ -11,6 +11,7 @@
 | `index.html` | The site, built into one file. Double-click to open in any browser; GitHub Pages serves it as the home page. |
 | `shadow-slave-site.jsx` | The source (one React component, default export). Edit this, then rebuild. |
 | `build.mjs`, `package.json` | The build: `npm install`, then `npm run build` writes `index.html`. |
+| `check.mjs` | `npm run check`: runs the source's self-checks (rules engine, rolls, decode, data) in Node and prints the animated-layer count per tab. Exits with an error if a check fails. |
 
 ## What it does
 
@@ -51,9 +52,10 @@ With Node installed, in this folder:
 ```
 npm install
 npm run build
+npm run check
 ```
 
-This writes `index.html`. (Or ask Claude to rebuild it.)
+This writes `index.html`, then runs the self-checks. (Or ask Sigil to rebuild it.)
 
 ## Hosting
 

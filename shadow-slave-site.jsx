@@ -173,9 +173,13 @@ function normalize(raw) {
   };
   c.id = typeof c.id === "string" && c.id ? c.id : mkId();
   c.soulClass = CLASSES[classIndex(c.soulClass)].name;
-  c.abilities = arr(c.abilities); c.statusAttributes = arr(c.statusAttributes); c.echoes = arr(c.echoes);
+  c.abilities = arr(c.abilities); c.statusAttributes = arr(c.statusAttributes);
   c.conditions = arr(c.conditions); c.wounds = Math.max(0, Math.min(3, Number(c.wounds) || 0));
   c.memories = arr(c.memories).map((m) => ({ ...m, id: m.id || mkId(), image: safeImg(m.image), enchantments: arr(m.enchantments) }));
+  c.echoes = arr(c.echoes).filter((e) => e && typeof e === "object").map((e) => ({
+    ...e, id: typeof e.id === "string" && e.id ? e.id : mkId(), image: safeImg(e.image), abilities: arr(e.abilities),
+    attributes: e.attributes && typeof e.attributes === "object" ? e.attributes : {},
+  }));
   const core = c.core || {};
   c.core = { inner: HEX.test(core.inner) ? core.inner : DEFAULT_CORE.inner, outer: HEX.test(core.outer) ? core.outer : DEFAULT_CORE.outer };
   return c;
@@ -389,10 +393,8 @@ const ringOf = (rank) => { const i = RANK_ORDER.indexOf(rank); return i < 2 ? 0 
 /** Where the sun sits on screen and how big, per tab. x/y = the sun's offset from screen center. */
 function camera(view, w, h) {
   const u = Math.min(w, h) / 800, wide = w >= 980;
-  if (view === "aspect") return { s: 13 * u, x: 0, y: 0 };
-  if (view === "memories") return wide ? { s: 1.15 * u, x: -w * 0.02, y: h * 0.03 } : { s: 0.95 * u, x: 0, y: -h * 0.2 };
-  const status = wide ? { s: 0.62 * u, x: w * 0.22, y: -h * 0.04 } : { s: 0.5 * u, x: 0, y: -h * 0.24 };
-  return view === "birth" ? { ...status, s: 0.015 } : status;
+  if (view === "birth") return { ...TABS[0].cam(w, h, u, wide), s: 0.015 }; // the core is born as a point, then the first tab's camera
+  return tabOf(view).cam(w, h, u, wide);
 }
 
 function Sea({ inner, outer }) {
@@ -552,7 +554,7 @@ function Orbits({ memories, outer, sel, onPick, active, far }) {
 
 function Scene({ ch, d, tab, cam, sel, onPick }) {
   const { inner, outer } = ch.core;
-  const deep = tab === "aspect";
+  const deep = !!tabOf(tab).inside;
   const far = { visibility: deep ? "hidden" : "visible", transition: `visibility 0s linear ${deep ? 1.6 : 0}s` };
   return (
     <div style={{
@@ -562,7 +564,7 @@ function Scene({ ch, d, tab, cam, sel, onPick }) {
     }}>
       <div style={far}><Sea inner={inner} outer={outer} /></div>
       <div style={far}><GhostSuns n={d.ci} inner={inner} outer={outer} real={ch.aspectRank === "Divine"} /></div>
-      <Core3D ch={ch} ci={d.ci} far={far} sel={sel} onPick={onPick} active={tab === "memories"} />
+      <Core3D ch={ch} ci={d.ci} far={far} sel={sel} onPick={onPick} active={!!tabOf(tab).stars} />
     </div>
   );
 }
@@ -714,7 +716,22 @@ function SelectScreen({ roster, activeId, onBind, onImport }) {
 /* ------------------------------------------------------------------ */
 /*  Header, color picker                                               */
 /* ------------------------------------------------------------------ */
-const TABS = [["status", "Status"], ["memories", "Memories"], ["aspect", "Aspect"]];
+/**
+ * The tabs, in menu order: the single place a tab is defined.
+ * cam = where the camera sits on the Soul Sea (sun offset from screen center + zoom); View = the panel drawn over it;
+ * delay = rune decode delay (ms); stars = Memory stars are clickable; inside = the camera is inside the core.
+ * Every View gets the same props: { ch, d, wide, vp, go, onChange, onRoll, sel, setSel } (sel = this tab's own selection).
+ */
+const TABS = [
+  { id: "status", label: "Status", View: StatusView, delay: 450,
+    cam: (w, h, u, wide) => (wide ? { s: 0.62 * u, x: w * 0.22, y: -h * 0.04 } : { s: 0.5 * u, x: 0, y: -h * 0.24 }) },
+  { id: "memories", label: "Memories", View: MemoriesView, delay: 450, stars: true,
+    cam: (w, h, u, wide) => (wide ? { s: 1.15 * u, x: -w * 0.02, y: h * 0.03 } : { s: 0.95 * u, x: 0, y: -h * 0.2 }) },
+  { id: "aspect", label: "Aspect", View: AspectView, delay: 900, inside: true,
+    cam: (w, h, u) => ({ s: 13 * u, x: 0, y: 0 }) },
+];
+const TAB = Object.fromEntries(TABS.map((t) => [t.id, t]));
+const tabOf = (id) => TAB[id] || TABS[0];
 
 function Header({ ch, d, tab, setTab, onPicker, onSwap, onExport, wide, warn }) {
   return (
@@ -731,7 +748,7 @@ function Header({ ch, d, tab, setTab, onPicker, onSwap, onExport, wide, warn }) 
         </div>
       </div>
       <nav style={{ display: "flex", gap: wide ? 34 : 18, justifyContent: "center", order: wide ? 0 : 3, width: wide ? "auto" : "100%", pointerEvents: "auto" }}>
-        {TABS.map(([id, text]) => (
+        {TABS.map(({ id, label: text }) => (
           <button key={id} onClick={() => setTab(id)} aria-current={tab === id ? "page" : undefined} style={{
             background: "none", border: "none", cursor: "pointer", padding: "6px 2px", fontFamily: F.mono, fontSize: 12, letterSpacing: 4,
             textTransform: "uppercase", color: tab === id ? C.cyan : C.dim, borderBottom: `1px solid ${tab === id ? C.cyan : "transparent"}`,
@@ -946,7 +963,9 @@ function StatusView({ ch, d, go, wide, onChange, onRoll }) {
             {mems.length > 4 && <span style={{ color: C.dim }}>…and {mems.length - 4} more.</span>}
           </> : <span style={{ color: C.faint }}>—</span>}
         </Line>
-        <Line k="Echoes" delay={420}>{ch.echoes.length ? ch.echoes.map((e, i) => <Tag key={e.id || i} text={e.name} delay={480} />) : <span style={{ color: C.faint }}>—</span>}</Line>
+        <Line k="Echoes" delay={420}>
+          {ch.echoes.length ? ch.echoes.map((e) => <Tag key={e.id} text={e.name} delay={480} onClick={TAB.echoes ? () => go("echoes", e.id) : undefined} />) : <span style={{ color: C.faint }}>—</span>}
+        </Line>
         <Line k="Attributes" delay={490}>
           {ch.statusAttributes.length ? ch.statusAttributes.map((a, i) => (
             <Tag key={a.id || i} text={a.name} delay={550 + i * 60} active={open === a.id} onClick={() => setOpen(open === a.id ? null : a.id)} />
@@ -1377,7 +1396,10 @@ export default function ShadowSlaveSite() {
   const vp = useViewport();
   const [store, setStore] = useState(() => {
     const s = loadStore();
-    if (PREVIEW?.patch) s.roster = [normalize({ ...RANULFO, ...PREVIEW.patch, memories: [...RANULFO.memories, ...(PREVIEW.patch.addMemories || [])] })];
+    if (PREVIEW?.patch) {
+      const { addMemories = [], addEchoes = [], ...patch } = PREVIEW.patch;
+      s.roster = [normalize({ ...RANULFO, ...patch, memories: [...RANULFO.memories, ...addMemories], echoes: [...RANULFO.echoes, ...addEchoes] })];
+    }
     if (PREVIEW?.phase === "site") s.activeId = s.roster[0].id;
     return s;
   });
@@ -1385,7 +1407,9 @@ export default function ShadowSlaveSite() {
   const [phase, setPhase] = useState(PREVIEW?.phase || "intro");
   const [tab, setTab] = useState(PREVIEW?.tab || "status");
   const [born, setBorn] = useState(!!PREVIEW);
-  const [sel, setSel] = useState(PREVIEW?.mem ? active?.memories[0]?.id : null);
+  // each tab keeps its own selection: { memories: id, echoes: id }
+  const [sel, setSel] = useState(() => ({ memories: PREVIEW?.mem ? active?.memories[0]?.id : null, echoes: PREVIEW?.echo ? active?.echoes[0]?.id : null }));
+  const pick = (t) => (id) => setSel((s) => ({ ...s, [t]: id }));
   const [picker, setPicker] = useState(false);
   const [warn, setWarn] = useState(false);
   const [roll, setRoll] = useState(null);
@@ -1401,7 +1425,7 @@ export default function ShadowSlaveSite() {
     return () => clearTimeout(t);
   }, [phase, born]);
 
-  const bind = (id) => { setStore((s) => ({ ...s, activeId: id })); setRoll(null); setBorn(false); setTab("status"); setSel(null); setPhase("site"); };
+  const bind = (id) => { setStore((s) => ({ ...s, activeId: id })); setRoll(null); setBorn(false); setTab(TABS[0].id); setSel({}); setPhase("site"); };
   /** Add an imported/new character; a sheet with the same name replaces the old one (keeps its colors). */
   const importChar = (raw) => {
     const same = store.roster.find((c) => c.name.trim().toLowerCase() === String(raw.name).trim().toLowerCase());
@@ -1421,7 +1445,8 @@ export default function ShadowSlaveSite() {
   };
   const doRoll = (title, pool, training = 0) => { const r = rollPool(pool); setRoll((prev) => ({ n: (prev?.n || 0) + 1, title, pool, training, rerolls: training, ...r })); };
   const reroll = (i) => { const v = d10(); setRoll((r) => (r && r.rerolls > 0 ? { ...r, rerolls: r.rerolls - 1, dice: r.dice.map((x, j) => (j === i ? { ...x, v: Math.max(x.v, v), rr: true } : x)) } : r)); };
-  const go = (t, memId) => { setTab(t); if (memId) setSel(memId); };
+  /** Switch tab; optionally select something there (a Memory, an Echo). */
+  const go = (t, id) => { setTab(t); if (id) pick(t)(id); };
 
   let body;
   if (phase === "intro") {
@@ -1432,18 +1457,17 @@ export default function ShadowSlaveSite() {
     const d = derive(active);
     const wide = vp.w >= 980;
     const { inner, outer } = active.core;
+    const T = tabOf(tab);
     body = (
       <>
         <div aria-hidden="true" style={{ position: "fixed", inset: 0, background: `radial-gradient(ellipse at 60% 30%, ${hexA(outer, 0.1)}, transparent 60%), ${C.void}`, transition: "background 1s" }} />
-        <Starfield hidden={tab === "aspect"} />
-        <Scene ch={active} d={d} tab={tab} cam={camera(born ? tab : "birth", vp.w, vp.h)} sel={sel} onPick={setSel} />
-        <CoreInterior show={tab === "aspect"} inner={inner} outer={outer} />
+        <Starfield hidden={!!T.inside} />
+        <Scene ch={active} d={d} tab={tab} cam={camera(born ? tab : "birth", vp.w, vp.h)} sel={sel.memories} onPick={pick("memories")} />
+        <CoreInterior show={!!T.inside} inner={inner} outer={outer} />
         <Header ch={active} d={d} tab={tab} setTab={setTab} wide={wide} warn={warn} onPicker={() => setPicker((p) => !p)} onSwap={() => { setPicker(false); setPhase("select"); }} onExport={exportSheet} />
         <main key={tab} style={{ position: "fixed", inset: 0, zIndex: 3, pointerEvents: "none" }}>
-          <DelayCtx.Provider value={tab === "aspect" ? 900 : 450}>
-            {tab === "status" && <StatusView ch={active} d={d} go={go} wide={wide} onChange={update} onRoll={doRoll} />}
-            {tab === "memories" && <MemoriesView ch={active} sel={sel} setSel={setSel} wide={wide} />}
-            {tab === "aspect" && <AspectView ch={active} d={d} onChange={update} onRoll={doRoll} />}
+          <DelayCtx.Provider value={T.delay}>
+            <T.View ch={active} d={d} wide={wide} vp={vp} go={go} onChange={update} onRoll={doRoll} sel={sel[T.id] ?? null} setSel={pick(T.id)} />
           </DelayCtx.Provider>
         </main>
         {picker && <CorePicker core={active.core} onChange={setCore} onClose={() => setPicker(false)} />}
@@ -1476,3 +1500,6 @@ console.assert(scoreRoll({ dice: [die(1), die(1), die(3)], auto: 0 }).gifted ===
 console.assert(scoreRoll({ dice: [die(9, 0, false), die(4, 2)], auto: 0 }).successes === 1, "roll: keep lowest, keen applies to the kept die");
 console.assert(scoreRoll({ dice: [die(3)], auto: 4 }).successes === 4, "roll: auto successes");
 console.assert(rollPool(dicePool(18, 30)).dice.length === 20 && rollPool(dicePool(1, -6)).dice.filter((x) => x.kept).length === 1, "roll: pool sizes");
+const normEcho = normalize({ name: "T", echoes: [{ name: "E", image: "javascript:x" }, null] }).echoes;
+console.assert(normEcho.length === 1 && !!normEcho[0].id && normEcho[0].image === "" && Array.isArray(normEcho[0].abilities), "normalize: echoes get an id, a safe image, abilities");
+console.assert(tabOf("nope") === TABS[0] && TABS.every((t) => t.View && t.cam && t.label), "tabs: one registry; unknown id falls back to the first");

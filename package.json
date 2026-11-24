@@ -5,7 +5,8 @@
   "description": "Fan-made companion site for a Shadow Slave TTRPG (Shadow Slave by Guiltythree).",
   "type": "module",
   "scripts": {
-    "build": "node build.mjs"
+    "build": "node build.mjs",
+    "check": "node check.mjs"
   },
   "devDependencies": {
     "esbuild": "0.21.5",
