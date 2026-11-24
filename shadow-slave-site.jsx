@@ -1139,9 +1139,6 @@ const circ = (x, y, r) => `M${x - r} ${y} a${r} ${r} 0 1 0 ${2 * r} 0 a${r} ${r}
  * Black body, rim light, two eyes: so an Echo never reads as one of Sunny's Shadows.
  */
 const ECHO_SHAPES = {
-  generic: { label: "Unknown", eyes: [[-7, -14], [7, -14]], parts: [
-    { d: "M0 -34 C16 -34 26 -20 26 -2 C26 14 34 24 30 34 C20 28 14 36 6 30 C0 36 -6 36 -10 30 C-18 36 -24 28 -30 34 C-34 24 -26 14 -26 -2 C-26 -20 -16 -34 0 -34 Z" },
-  ] },
   beast: { label: "Beast", eyes: [[36, -15], [41, -14]], parts: [
     { d: "M-40 4 C-44 -2 -42 -8 -36 -10 C-26 -16 -6 -16 10 -14 C18 -13 22 -20 28 -22 L31 -31 L34 -22 L38 -29 L39 -20 C44 -18 48 -12 48 -8 L44 -4 C40 -3 36 -2 32 0 C28 6 24 10 22 12 L25 30 L18 30 L15 14 C6 16 -6 16 -16 14 L-19 30 L-26 30 L-27 12 C-32 10 -36 8 -40 4 Z" },
     { d: "M-38 -4 C-46 -8 -49 -18 -45 -27 C-44 -17 -40 -11 -33 -9 Z" },
@@ -1164,11 +1161,14 @@ const ECHO_SHAPES = {
     [-6, 26, 3], [8, -28, 3], [-12, -30, 2.5], [36, 14, 2.5], [-38, -8, 2.5], [4, 22, 2.8],
   ].map(([x, y, r]) => ({ d: circ(x, y, r) })) },
 };
-/** The silhouette for an Echo's `shape`; missing or unknown = the neutral generic one. */
-const echoShape = (s) => {
+/** The ECHO_SHAPES key for an Echo's `shape` (any case, trimmed), or null when missing or unknown. */
+const echoShapeKey = (s) => {
   const k = String(s ?? "").trim().toLowerCase();
-  return Object.prototype.hasOwnProperty.call(ECHO_SHAPES, k) ? ECHO_SHAPES[k] : ECHO_SHAPES.generic;
+  return Object.prototype.hasOwnProperty.call(ECHO_SHAPES, k) ? k : null;
 };
+/** The silhouette for an Echo's `shape`; missing or unknown = humanoid (Toni 2026-11-24). */
+const ECHO_SHAPE_FALLBACK = "humanoid";
+const echoShape = (s) => ECHO_SHAPES[echoShapeKey(s) ?? ECHO_SHAPE_FALLBACK];
 /** Rank → depth: 0 = just under the surface (Dormant) … 1 = deepest (Divine). Stronger Echoes sink deeper. */
 const echoDepth = (rank) => rankIdx(rank) / (RANK_ORDER.length - 1);
 /** Rank → rim and eye color, the same scale as the Memory stars. */
@@ -1283,7 +1283,7 @@ const scoreOf = (v) => (v == null || String(v).trim() === "" || !Number.isFinite
 
 /** Display only: no rolls, no costs (Echo cost rules are under review). */
 function EchoCard({ e, halo, onSummon }) {
-  const c = echoColor(e.rank), shape = echoShape(e.shape);
+  const c = echoColor(e.rank), shapeKey = echoShapeKey(e.shape);
   const fadeMask = { WebkitMaskImage: "linear-gradient(to bottom, #000 55%, transparent)", maskImage: "linear-gradient(to bottom, #000 55%, transparent)" };
   return (
     <Panel title="Echo" accent={c} delay={0.2}>
@@ -1299,7 +1299,7 @@ function EchoCard({ e, halo, onSummon }) {
       <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", margin: "12px 0 4px" }}>
         <Badge color={c}>{e.rank || "Dormant"} Echo</Badge>
         <TierMark tier={e.tier} />
-        {e.shape && <span style={{ fontFamily: F.mono, fontSize: 9.5, color: C.faint, letterSpacing: 1 }}>{shape === ECHO_SHAPES.generic ? e.shape : shape.label}</span>}
+        {e.shape && <span style={{ fontFamily: F.mono, fontSize: 9.5, color: C.faint, letterSpacing: 1 }}>{shapeKey ? ECHO_SHAPES[shapeKey].label : e.shape}</span>}
         <button onClick={onSummon} aria-pressed={!!e.summoned} title="Visual only: a summoned Echo rises to the surface" style={{ ...chip(C.cyan, !!e.summoned), marginLeft: "auto" }}>
           {e.summoned ? "⟱ Dismiss" : "⟰ Summon"}
         </button>
@@ -1786,7 +1786,8 @@ console.assert(normEcho.length === 1 && !!normEcho[0].id && normEcho[0].image ==
 console.assert(tabOf("nope") === TABS[0] && TABS.every((t) => t.View && t.cam && t.label), "tabs: one registry; unknown id falls back to the first");
 console.assert(TABS.map((t) => t.id).join() === "status,memories,echoes,aspect", "tabs: Status · Memories · Echoes · Aspect");
 console.assert(echoShape("Beast") === ECHO_SHAPES.beast && echoShape(" serpent ") === ECHO_SHAPES.serpent, "echo shape: by name, any case");
-console.assert(echoShape(undefined) === ECHO_SHAPES.generic && echoShape("dragon") === ECHO_SHAPES.generic && echoShape("constructor") === ECHO_SHAPES.generic, "echo shape: missing/unknown = generic");
+console.assert(echoShape(undefined) === ECHO_SHAPES.humanoid && echoShape("") === ECHO_SHAPES.humanoid && echoShape("dragon") === ECHO_SHAPES.humanoid && echoShape("constructor") === ECHO_SHAPES.humanoid, "echo shape: missing/unknown = humanoid");
+console.assert(!("generic" in ECHO_SHAPES) && echoShapeKey("generic") === null && echoShapeKey(" Winged ") === "winged" && echoShapeKey("dragon") === null, "echo shape key: known keys only, no ghost shape");
 console.assert(Object.values(ECHO_SHAPES).every((s) => s.label && s.eyes.length === 2 && s.parts.length > 0), "echo shapes: every shape has a label, two eyes, a body");
 console.assert(echoDepth("Dormant") === 0 && echoDepth("Divine") === 1 && echoDepth("Awakened") < echoDepth("Supreme") && echoDepth("junk") === 0, "echo depth: stronger = deeper");
 console.assert(echoColor("Supreme") === STARS.Supreme.c && echoColor("junk") === STARS.Dormant.c, "echo color: Memory-star scale");
